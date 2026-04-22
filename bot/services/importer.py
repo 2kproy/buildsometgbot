@@ -15,11 +15,23 @@ def _default_settings() -> dict[str, Any]:
     return {"show_back": True, "show_main_menu": True, "main_menu_target": "start"}
 
 
+def _pick_node_text(source: dict[str, Any]) -> str:
+    """Prefer crawler HTML text when available, fallback to plain text."""
+    text_html = source.get("text_html")
+    if isinstance(text_html, str) and text_html.strip():
+        return text_html
+    return str(source.get("text", ""))
+
+
 def import_crawler_graph(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     source_nodes = data.get("nodes", {})
     root_id = data.get("root")
-    report = {"warnings": [], "mapped_by": {"meta.transition_key": 0, "exact_text": 0, "positional_fallback": 0, "missing": 0}}
+    report = {
+        "warnings": [],
+        "mapped_by": {"meta.transition_key": 0, "exact_text": 0, "positional_fallback": 0, "missing": 0},
+        "text_mode": {"text_html": 0, "text": 0},
+    }
     normalized_nodes: dict[str, Any] = {}
     source_ids = list(source_nodes.keys())
     id_map: dict[str, str] = {}
@@ -28,7 +40,12 @@ def import_crawler_graph(path: Path) -> dict[str, Any]:
 
     for source_node_id, source in source_nodes.items():
         node_id = id_map[source_node_id]
-        text = str(source.get("text", ""))
+        text_html = source.get("text_html")
+        text = _pick_node_text(source)
+        if isinstance(text_html, str) and text_html.strip():
+            report["text_mode"]["text_html"] += 1
+        else:
+            report["text_mode"]["text"] += 1
         buttons_grid = source.get("buttons") or []
         transitions = source.get("transitions") or {}
         button_meta = source.get("button_meta") or []
