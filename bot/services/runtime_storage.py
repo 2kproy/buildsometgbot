@@ -11,6 +11,19 @@ from redis.asyncio import Redis
 logger = logging.getLogger(__name__)
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
 class RuntimeStorage:
     def __init__(self, postgres_dsn: str, redis_url: str) -> None:
         self.postgres_dsn = postgres_dsn
@@ -169,7 +182,11 @@ class RuntimeStorage:
         if not row:
             state = {"current_edit_node": "start", "mode": "idle"}
         else:
-            state = {"current_edit_node": row["current_edit_node"], "mode": row["mode"], **(row["extra"] or {})}
+            state = {
+                "current_edit_node": row["current_edit_node"],
+                "mode": row["mode"],
+                **_as_mapping(row["extra"]),
+            }
         await self.redis.setex(cache_key, self.admin_state_ttl, json.dumps(state, ensure_ascii=False))
         return state
 
@@ -228,7 +245,11 @@ class RuntimeStorage:
             rows = await conn.fetch("SELECT telegram_id, current_edit_node, mode, extra FROM admin_state")
         result = {}
         for row in rows:
-            result[str(row["telegram_id"])] = {"current_edit_node": row["current_edit_node"], "mode": row["mode"], **(row["extra"] or {})}
+            result[str(row["telegram_id"])] = {
+                "current_edit_node": row["current_edit_node"],
+                "mode": row["mode"],
+                **_as_mapping(row["extra"]),
+            }
         return result
 
     async def save_admin_state_all(self, payload: dict[str, Any]) -> None:
