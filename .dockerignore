@@ -1,0 +1,16 @@
+.git
+.github
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+venv
+env
+.env
+bot.log
+bot.err.log
+*.db
+dist
+build
