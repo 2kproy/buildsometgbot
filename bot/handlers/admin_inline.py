@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 import json
@@ -47,9 +47,9 @@ def _broadcast_actions_keyboard(rows: list[dict]) -> InlineKeyboardMarkup | None
         bid = int(row["id"])
         keyboard_rows.append(
             [
-                InlineKeyboardButton(text=f"Send {bid}", callback_data=f"bcs:{bid}"),
-                InlineKeyboardButton(text=f"Status {bid}", callback_data=f"bci:{bid}"),
-                InlineKeyboardButton(text=f"Cancel {bid}", callback_data=f"bcc:{bid}"),
+                InlineKeyboardButton(text=f"Отправить {bid}", callback_data=f"bcs:{bid}"),
+                InlineKeyboardButton(text=f"Статус {bid}", callback_data=f"bci:{bid}"),
+                InlineKeyboardButton(text=f"Отменить {bid}", callback_data=f"bcc:{bid}"),
             ]
         )
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
@@ -69,7 +69,7 @@ async def cb_adm_list(callback: CallbackQuery) -> None:
 async def cb_adm_menu(callback: CallbackQuery) -> None:
     if not _is_admin(callback):
         return
-    await callback.message.answer("Admin panel", reply_markup=admin_panel_keyboard())
+    await callback.message.answer("Админ-панель", reply_markup=admin_panel_keyboard())
     await callback.answer()
 
 
@@ -77,7 +77,7 @@ async def cb_adm_menu(callback: CallbackQuery) -> None:
 async def cb_adm_broadcast(callback: CallbackQuery) -> None:
     if not _is_admin(callback):
         return
-    await callback.message.answer("Broadcast menu", reply_markup=broadcast_menu_keyboard())
+    await callback.message.answer("Меню рассылок", reply_markup=broadcast_menu_keyboard())
     await callback.answer()
 
 
@@ -88,7 +88,7 @@ async def cb_bc_new(callback: CallbackQuery) -> None:
     app = get_app()
     payload, node_id, node = await _current_node_ctx(callback.from_user.id)
     if not node:
-        await callback.message.answer("Current node not found.")
+        await callback.message.answer("Текущая нода не найдена.")
         await callback.answer()
         return
     name = f"broadcast_{int(datetime.now(tz=timezone.utc).timestamp())}"
@@ -99,7 +99,7 @@ async def cb_bc_new(callback: CallbackQuery) -> None:
         "source_node_id": node_id,
     }
     bc_id = await app.storage.create_broadcast(name, bc_payload, callback.from_user.id)
-    await callback.message.answer(f"Broadcast created: {_code(str(bc_id))} from node {_code(node_id)}", reply_markup=broadcast_menu_keyboard())
+    await callback.message.answer(f"Рассылка создана: {_code(str(bc_id))} из ноды {_code(node_id)}", reply_markup=broadcast_menu_keyboard())
     await callback.answer()
 
 
@@ -110,10 +110,10 @@ async def cb_bc_list(callback: CallbackQuery) -> None:
     app = get_app()
     rows = await app.storage.list_broadcasts(limit=20)
     if not rows:
-        await callback.message.answer("No broadcasts yet.", reply_markup=broadcast_menu_keyboard())
+        await callback.message.answer("Рассылок пока нет.", reply_markup=broadcast_menu_keyboard())
         await callback.answer()
         return
-    lines = ["Broadcasts:"]
+    lines = ["Рассылки:"]
     for row in rows[:10]:
         lines.append(f"- id={_code(str(row['id']))} | {html.escape(str(row['name']))} | {row['status']} | {row.get('scheduled_at')}")
     await callback.message.answer("\n".join(lines), reply_markup=_broadcast_actions_keyboard(rows))
@@ -126,7 +126,7 @@ async def cb_bc_send_latest(callback: CallbackQuery) -> None:
         return
     rows = await get_app().storage.list_broadcasts(limit=1)
     if not rows:
-        await callback.message.answer("No broadcasts yet.")
+        await callback.message.answer("Рассылок пока нет.")
         await callback.answer()
         return
     bid = int(rows[0]["id"])
@@ -140,7 +140,7 @@ async def cb_bc_status_latest(callback: CallbackQuery) -> None:
         return
     rows = await get_app().storage.list_broadcasts(limit=1)
     if not rows:
-        await callback.message.answer("No broadcasts yet.")
+        await callback.message.answer("Рассылок пока нет.")
         await callback.answer()
         return
     await _show_broadcast_status(callback.message, int(rows[0]["id"]))
@@ -173,11 +173,11 @@ async def cb_bc_cancel(callback: CallbackQuery) -> None:
     app = get_app()
     row = await app.storage.get_broadcast(bid)
     if not row:
-        await callback.message.answer("Broadcast not found.")
+        await callback.message.answer("Рассылка не найдена.")
         await callback.answer()
         return
     await app.storage.cancel_broadcast(bid)
-    await callback.message.answer(f"Broadcast {_code(str(bid))} canceled.", reply_markup=broadcast_menu_keyboard())
+    await callback.message.answer(f"Рассылка {_code(str(bid))} отменена.", reply_markup=broadcast_menu_keyboard())
     await callback.answer()
 
 
@@ -185,15 +185,15 @@ async def _send_broadcast_now(message: Message, bid: int) -> None:
     app = get_app()
     row = await app.storage.get_broadcast(bid)
     if not row:
-        await message.answer("Broadcast not found.")
+        await message.answer("Рассылка не найдена.")
         return
     recipients = await app.storage.list_recipients()
     if not recipients:
-        await message.answer("No recipients yet. Ask users to open bot first.")
+        await message.answer("Получателей пока нет. Попросите пользователей сначала открыть бота.")
         return
     await app.storage.schedule_broadcast(bid, datetime.now(timezone.utc))
     await message.answer(
-        f"Broadcast {_code(str(bid))} scheduled now. Recipients: {_code(str(len(recipients)))}",
+        f"Рассылка {_code(str(bid))} поставлена в очередь. Получателей: {_code(str(len(recipients)))}",
         reply_markup=broadcast_menu_keyboard(),
     )
 
@@ -202,13 +202,13 @@ async def _show_broadcast_status(message: Message, bid: int) -> None:
     app = get_app()
     row = await app.storage.get_broadcast(bid)
     if not row:
-        await message.answer("Broadcast not found.")
+        await message.answer("Рассылка не найдена.")
         return
     report = row.get("report") or {}
     await message.answer(
-        f"id={_code(str(row['id']))}\nname={html.escape(str(row['name']))}\nstatus={row['status']}\n"
-        f"scheduled_at={row.get('scheduled_at')}\nstarted_at={row.get('started_at')}\nfinished_at={row.get('finished_at')}\n"
-        f"report={html.escape(json.dumps(report, ensure_ascii=False))}",
+        f"id={_code(str(row['id']))}\nназвание={html.escape(str(row['name']))}\nстатус={row['status']}\n"
+        f"запланировано={row.get('scheduled_at')}\nстарт={row.get('started_at')}\nфиниш={row.get('finished_at')}\n"
+        f"отчёт={html.escape(json.dumps(report, ensure_ascii=False))}",
         reply_markup=broadcast_menu_keyboard(),
     )
 
@@ -274,7 +274,7 @@ async def cb_adm_stats(callback: CallbackQuery) -> None:
     report = validate_graph(payload["nodes"], payload["metadata"].get("real_root_id", "start"))
     s = report["summary"]
     await callback.message.answer(
-        f"Stats:\n- total nodes: {s['total_nodes']}\n- total buttons: {s['total_buttons']}\n- broken links: {s['broken_links']}\n- orphan nodes: {s['orphans']}"
+        f"Статистика:\n- всего нод: {s['total_nodes']}\n- всего кнопок: {s['total_buttons']}\n- битых ссылок: {s['broken_links']}\n- сирот: {s['orphans']}"
     )
     await callback.answer()
 
@@ -288,7 +288,7 @@ async def cb_adm_fix(callback: CallbackQuery) -> None:
     result = auto_fix_broken_links(payload["nodes"], create_placeholder=False)
     await app.storage.save_nodes_payload(payload)
     await callback.message.answer(
-        f"Fix done:\n- removed_broken_buttons: {result['removed_broken_buttons']}\n- created_placeholders: {result['created_placeholders']}"
+        f"Автофикс выполнен:\n- удалено битых кнопок: {result['removed_broken_buttons']}\n- создано плейсхолдеров: {result['created_placeholders']}"
     )
     await callback.answer()
 
@@ -382,7 +382,7 @@ async def cb_admin_node_action(callback: CallbackQuery, state: FSMContext) -> No
             )
     elif action == "preview":
         text, keyboard, _ = await render_node(payload, node_id)
-        await callback.message.answer(f"Preview: {_code(node_id)}")
+        await callback.message.answer(f"Предпросмотр: {_code(node_id)}")
         await send_rendered_node(callback.message, payload["nodes"][node_id], text, keyboard)
     elif action == "tree":
         admin_state = await get_app().storage.load_admin_state(callback.from_user.id)
@@ -390,7 +390,7 @@ async def cb_admin_node_action(callback: CallbackQuery, state: FSMContext) -> No
         await callback.message.answer(build_tree_view(payload["nodes"], node_id, depth=depth))
     elif action == "delete_node":
         refs = find_incoming_refs(payload["nodes"], node_id)
-        lines = [f"Node is referenced by {len(refs)} nodes:"]
+        lines = [f"На ноду ссылаются {len(refs)} нод:"]
         lines.extend(f"- {x['from_node']} / {x['button_text']}" for x in refs[:30])
         await state.set_state(AdminStates.delete_confirm)
         await state.update_data(delete_node_id=node_id)
@@ -399,8 +399,8 @@ async def cb_admin_node_action(callback: CallbackQuery, state: FSMContext) -> No
             "Подтвердите удаление:",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Cancel", callback_data="delnode:cancel")],
-                    [InlineKeyboardButton(text="Force Delete", callback_data="delnode:force")],
+                    [InlineKeyboardButton(text="Отмена", callback_data="delnode:cancel")],
+                    [InlineKeyboardButton(text="Удалить принудительно", callback_data="delnode:force")],
                 ]
             ),
         )
@@ -447,7 +447,7 @@ async def cb_admin_link_pick(callback: CallbackQuery, state: FSMContext) -> None
     await state.set_state(AdminStates.linking_target)
     await state.update_data(link_button_id=button_id)
     await callback.message.answer(
-        f"Текущая нода: {_code(node_id)}\nВыберите target ноду или введите id сообщением:",
+        f"Текущая нода: {_code(node_id)}\nВыберите target-ноду или введите id сообщением:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
     await callback.answer()
@@ -493,3 +493,6 @@ async def _apply_link_target(message: Message, user_id: int, target: str, state:
     await state.clear()
     await message.answer(f"Ссылка обновлена: {_code(button_id)} -> {_code(target)}\nТекущая нода: {_code(node_id)}")
     await message.answer(render_admin_node(node_id, node), reply_markup=admin_node_actions_keyboard())
+
+
+
