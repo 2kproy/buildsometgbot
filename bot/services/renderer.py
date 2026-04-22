@@ -27,24 +27,24 @@ async def render_node(payload: dict[str, Any], node_id: str) -> tuple[str, Inlin
 async def send_rendered_node(message: Message, node: dict[str, Any], text: str, keyboard: InlineKeyboardMarkup) -> Message:
     media = node.get("media")
     if not isinstance(media, dict) or not media.get("file_id") or not media.get("type"):
-        return await message.answer(text, reply_markup=keyboard)
+        return await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
     media_type = media["type"]
     file_id = media["file_id"]
     if media_type == "photo":
-        return await message.answer_photo(file_id, caption=text, reply_markup=keyboard)
+        return await message.answer_photo(file_id, caption=text, reply_markup=keyboard, parse_mode="HTML")
     if media_type == "video":
-        return await message.answer_video(file_id, caption=text, reply_markup=keyboard)
+        return await message.answer_video(file_id, caption=text, reply_markup=keyboard, parse_mode="HTML")
     if media_type == "document":
-        return await message.answer_document(file_id, caption=text, reply_markup=keyboard)
+        return await message.answer_document(file_id, caption=text, reply_markup=keyboard, parse_mode="HTML")
     if media_type == "animation":
-        return await message.answer_animation(file_id, caption=text, reply_markup=keyboard)
+        return await message.answer_animation(file_id, caption=text, reply_markup=keyboard, parse_mode="HTML")
     if media_type == "audio":
-        return await message.answer_audio(file_id, caption=text, reply_markup=keyboard)
+        return await message.answer_audio(file_id, caption=text, reply_markup=keyboard, parse_mode="HTML")
     if media_type == "voice":
         await message.answer_voice(file_id)
-        return await message.answer(text, reply_markup=keyboard)
-    return await message.answer(text, reply_markup=keyboard)
+        return await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    return await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 def render_admin_node(node_id: str, node: dict[str, Any]) -> str:

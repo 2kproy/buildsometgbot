@@ -101,7 +101,7 @@ async def cb_button(callback: CallbackQuery) -> None:
         return
     b_type = button.get("type")
     if b_type == "reply":
-        await callback.message.answer(str(button.get("target", "")))
+        await callback.message.answer(str(button.get("target", "")), parse_mode="HTML")
         await callback.answer()
         return
     if b_type == "url":
