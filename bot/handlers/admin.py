@@ -24,6 +24,7 @@ from bot.states.admin import AdminStates
 from bot.utils.formatting import format_validation
 from bot.utils.ids import short_button_id
 from bot.utils.mermaid import build_mermaid_subtree
+from bot.utils.telegram_text import message_text_as_html
 
 router = Router()
 
@@ -183,7 +184,7 @@ async def fsm_create_text(message: Message, state: FSMContext) -> None:
     app = get_app()
     data = await state.get_data()
     node_id = data["new_node_id"]
-    text = message.text or ""
+    text = message_text_as_html(message)
     payload = await app.storage.load_nodes_payload()
     if node_id in payload["nodes"]:
         await message.answer("Нода уже существует.")
@@ -231,7 +232,7 @@ async def fsm_edit_text(message: Message, state: FSMContext) -> None:
         await message.answer("Нода не найдена.")
         await state.clear()
         return
-    node["text"] = message.text or ""
+    node["text"] = message_text_as_html(message)
     await app.storage.save_nodes_payload(payload)
     await state.clear()
     await message.answer(f"Сохранено.\nТекущая нода: {_code(node_id)}")
@@ -309,7 +310,12 @@ async def cb_pick_target(callback, state: FSMContext) -> None:
 async def fsm_add_target_manual(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
         return
-    await state.update_data(add_target=(message.text or "").strip())
+    data = await state.get_data()
+    b_type = str(data.get("add_type", ""))
+    if b_type == "reply":
+        await state.update_data(add_target=message_text_as_html(message))
+    else:
+        await state.update_data(add_target=(message.text or "").strip())
     await state.set_state(AdminStates.adding_row)
     await message.answer("Введите row (число, default 0):")
 
