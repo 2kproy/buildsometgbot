@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -50,6 +51,13 @@ class BroadcastService:
             return
         await self.storage.mark_broadcast_running(broadcast_id)
         payload = bc.get("payload") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
         recipients = await self.storage.list_recipients()
         delivered = 0
         failed = 0
@@ -111,11 +119,13 @@ class BroadcastService:
 
     @staticmethod
     def _build_keyboard(buttons: list[dict[str, Any]]) -> InlineKeyboardMarkup | None:
-        if not buttons:
+        if not isinstance(buttons, list) or not buttons:
             return None
         rows: list[list[InlineKeyboardButton]] = []
         by_row: dict[int, list[dict[str, Any]]] = {}
         for b in buttons:
+            if not isinstance(b, dict):
+                continue
             row = int(b.get("row", 0))
             by_row.setdefault(row, []).append(b)
         for row in sorted(by_row.keys()):
@@ -126,4 +136,3 @@ class BroadcastService:
             if row_items:
                 rows.append(row_items)
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-

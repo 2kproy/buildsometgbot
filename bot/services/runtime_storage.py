@@ -285,7 +285,22 @@ class RuntimeStorage:
                 "SELECT id, name, payload, status, scheduled_at, report, started_at, finished_at FROM broadcasts WHERE id=$1",
                 int(broadcast_id),
             )
-        return dict(row) if row else None
+        if not row:
+            return None
+        data = dict(row)
+        payload = data.get("payload")
+        report = data.get("report")
+        if isinstance(payload, str):
+            try:
+                data["payload"] = json.loads(payload)
+            except Exception:
+                data["payload"] = {}
+        if isinstance(report, str):
+            try:
+                data["report"] = json.loads(report)
+            except Exception:
+                data["report"] = {}
+        return data
 
     async def schedule_broadcast(self, broadcast_id: int, when: datetime) -> None:
         assert self.pool is not None
@@ -397,4 +412,3 @@ class RuntimeStorage:
         assert self.redis is not None
         key = f"bc:{broadcast_id}:{telegram_id}"
         return bool(await self.redis.set(key, "1", ex=ttl_sec, nx=True))
-
