@@ -7,7 +7,9 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.keyboards.admin import admin_node_actions_keyboard
+from datetime import datetime, timezone
+
+from bot.keyboards.admin import admin_node_actions_keyboard, admin_panel_keyboard, broadcast_menu_keyboard
 from bot.runtime import get_app
 from bot.services.fixer import auto_fix_broken_links
 from bot.services.graph_refs import find_incoming_refs
@@ -37,6 +39,22 @@ async def _current_node_ctx(user_id: int) -> tuple[dict, str, dict]:
     return payload, node_id, payload["nodes"].get(node_id)
 
 
+def _broadcast_actions_keyboard(rows: list[dict]) -> InlineKeyboardMarkup | None:
+    if not rows:
+        return None
+    keyboard_rows: list[list[InlineKeyboardButton]] = []
+    for row in rows[:10]:
+        bid = int(row["id"])
+        keyboard_rows.append(
+            [
+                InlineKeyboardButton(text=f"Send {bid}", callback_data=f"bcs:{bid}"),
+                InlineKeyboardButton(text=f"Status {bid}", callback_data=f"bci:{bid}"),
+                InlineKeyboardButton(text=f"Cancel {bid}", callback_data=f"bcc:{bid}"),
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+
 @router.callback_query(F.data == "adm:list")
 async def cb_adm_list(callback: CallbackQuery) -> None:
     if not _is_admin(callback):
@@ -45,6 +63,154 @@ async def cb_adm_list(callback: CallbackQuery) -> None:
     text = "Ноды:\n" + "\n".join(f"- {nid}" for nid in sorted(payload["nodes"].keys())[:80])
     await callback.message.answer(text)
     await callback.answer()
+
+
+@router.callback_query(F.data == "adm:menu")
+async def cb_adm_menu(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    await callback.message.answer("Admin panel", reply_markup=admin_panel_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "adm:broadcast")
+async def cb_adm_broadcast(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    await callback.message.answer("Broadcast menu", reply_markup=broadcast_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bc:new")
+async def cb_bc_new(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    app = get_app()
+    payload, node_id, node = await _current_node_ctx(callback.from_user.id)
+    if not node:
+        await callback.message.answer("Current node not found.")
+        await callback.answer()
+        return
+    name = f"broadcast_{int(datetime.now(tz=timezone.utc).timestamp())}"
+    bc_payload = {
+        "text": node.get("text", ""),
+        "media": node.get("media"),
+        "buttons": [b for b in node.get("buttons", []) if b.get("type") == "url"],
+        "source_node_id": node_id,
+    }
+    bc_id = await app.storage.create_broadcast(name, bc_payload, callback.from_user.id)
+    await callback.message.answer(f"Broadcast created: {_code(str(bc_id))} from node {_code(node_id)}", reply_markup=broadcast_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bc:list")
+async def cb_bc_list(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    app = get_app()
+    rows = await app.storage.list_broadcasts(limit=20)
+    if not rows:
+        await callback.message.answer("No broadcasts yet.", reply_markup=broadcast_menu_keyboard())
+        await callback.answer()
+        return
+    lines = ["Broadcasts:"]
+    for row in rows[:10]:
+        lines.append(f"- id={_code(str(row['id']))} | {html.escape(str(row['name']))} | {row['status']} | {row.get('scheduled_at')}")
+    await callback.message.answer("\n".join(lines), reply_markup=_broadcast_actions_keyboard(rows))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bc:send_latest")
+async def cb_bc_send_latest(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    rows = await get_app().storage.list_broadcasts(limit=1)
+    if not rows:
+        await callback.message.answer("No broadcasts yet.")
+        await callback.answer()
+        return
+    bid = int(rows[0]["id"])
+    await _send_broadcast_now(callback.message, bid)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bc:status_latest")
+async def cb_bc_status_latest(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    rows = await get_app().storage.list_broadcasts(limit=1)
+    if not rows:
+        await callback.message.answer("No broadcasts yet.")
+        await callback.answer()
+        return
+    await _show_broadcast_status(callback.message, int(rows[0]["id"]))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("bcs:"))
+async def cb_bc_send(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    bid = int(callback.data.split(":", 1)[1])
+    await _send_broadcast_now(callback.message, bid)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("bci:"))
+async def cb_bc_status(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    bid = int(callback.data.split(":", 1)[1])
+    await _show_broadcast_status(callback.message, bid)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("bcc:"))
+async def cb_bc_cancel(callback: CallbackQuery) -> None:
+    if not _is_admin(callback):
+        return
+    bid = int(callback.data.split(":", 1)[1])
+    app = get_app()
+    row = await app.storage.get_broadcast(bid)
+    if not row:
+        await callback.message.answer("Broadcast not found.")
+        await callback.answer()
+        return
+    await app.storage.cancel_broadcast(bid)
+    await callback.message.answer(f"Broadcast {_code(str(bid))} canceled.", reply_markup=broadcast_menu_keyboard())
+    await callback.answer()
+
+
+async def _send_broadcast_now(message: Message, bid: int) -> None:
+    app = get_app()
+    row = await app.storage.get_broadcast(bid)
+    if not row:
+        await message.answer("Broadcast not found.")
+        return
+    recipients = await app.storage.list_recipients()
+    if not recipients:
+        await message.answer("No recipients yet. Ask users to open bot first.")
+        return
+    await app.storage.schedule_broadcast(bid, datetime.now(timezone.utc))
+    await message.answer(
+        f"Broadcast {_code(str(bid))} scheduled now. Recipients: {_code(str(len(recipients)))}",
+        reply_markup=broadcast_menu_keyboard(),
+    )
+
+
+async def _show_broadcast_status(message: Message, bid: int) -> None:
+    app = get_app()
+    row = await app.storage.get_broadcast(bid)
+    if not row:
+        await message.answer("Broadcast not found.")
+        return
+    report = row.get("report") or {}
+    await message.answer(
+        f"id={_code(str(row['id']))}\nname={html.escape(str(row['name']))}\nstatus={row['status']}\n"
+        f"scheduled_at={row.get('scheduled_at')}\nstarted_at={row.get('started_at')}\nfinished_at={row.get('finished_at')}\n"
+        f"report={html.escape(json.dumps(report, ensure_ascii=False))}",
+        reply_markup=broadcast_menu_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "adm:validate")

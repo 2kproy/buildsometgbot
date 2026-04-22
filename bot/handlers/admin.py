@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 import json
@@ -11,7 +11,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.keyboards.admin import admin_node_actions_keyboard, admin_panel_keyboard, confirm_delete_keyboard
+from bot.keyboards.admin import admin_node_actions_keyboard, admin_panel_keyboard, broadcast_menu_keyboard, confirm_delete_keyboard
 from bot.runtime import get_app
 from bot.services.fixer import auto_fix_broken_links, ensure_error_node
 from bot.services.graph_refs import find_incoming_refs
@@ -45,6 +45,25 @@ async def _get_admin_state(user_id: int) -> dict:
     return state
 
 
+async def _create_broadcast_from_current_node(admin_id: int, name: str | None = None) -> tuple[int, str]:
+    app = get_app()
+    admin_state = await _get_admin_state(admin_id)
+    node_id = admin_state.get("current_edit_node", "start")
+    payload_nodes = await app.storage.load_nodes_payload()
+    node = payload_nodes["nodes"].get(node_id)
+    if not node:
+        raise ValueError("current_node_not_found")
+    safe_name = (name or "").strip() or f"broadcast_{int(datetime.now(tz=timezone.utc).timestamp())}"
+    payload = {
+        "text": node.get("text", ""),
+        "media": node.get("media"),
+        "buttons": [b for b in node.get("buttons", []) if b.get("type") == "url"],
+        "source_node_id": node_id,
+    }
+    broadcast_id = await app.storage.create_broadcast(safe_name, payload, admin_id)
+    return broadcast_id, node_id
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
@@ -53,7 +72,7 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     admin_state["mode"] = "idle"
     await get_app().storage.save_admin_state(message.from_user.id, admin_state)
-    await message.answer("Операция отменена.")
+    await message.answer("РћРїРµСЂР°С†РёСЏ РѕС‚РјРµРЅРµРЅР°.")
 
 
 @router.message(Command("admin"))
@@ -61,7 +80,7 @@ async def cmd_admin(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
         return
     await state.clear()
-    await message.answer("Админ-панель", reply_markup=admin_panel_keyboard())
+    await message.answer("РђРґРјРёРЅ-РїР°РЅРµР»СЊ", reply_markup=admin_panel_keyboard())
 
 
 @router.message(Command("open"))
@@ -79,7 +98,7 @@ async def cmd_open(message: Message, command: CommandObject, state: FSMContext) 
         node_id = payload["metadata"].get("real_root_id", "start")
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     admin_state = await _get_admin_state(message.from_user.id)
     admin_state["current_edit_node"] = node_id
@@ -100,7 +119,7 @@ async def cmd_current(message: Message) -> None:
         node_id = user_state.get("current_node", "start")
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Текущая нода отсутствует")
+        await message.answer("РўРµРєСѓС‰Р°СЏ РЅРѕРґР° РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚")
         return
     await message.answer(render_admin_node(node_id, node), reply_markup=admin_node_actions_keyboard())
 
@@ -112,7 +131,7 @@ async def cmd_list(message: Message) -> None:
     app = get_app()
     payload = await app.storage.load_nodes_payload()
     node_ids = sorted(payload["nodes"].keys())
-    lines = ["Ноды:"]
+    lines = ["РќРѕРґС‹:"]
     lines.extend(f"- {nid}" for nid in node_ids[:80])
     await message.answer("\n".join(lines))
 
@@ -136,7 +155,7 @@ async def cmd_search(message: Message, command: CommandObject) -> None:
             if term in str(btn.get("text", "")).lower():
                 matched.append(node_id)
                 break
-    await message.answer("Результаты:\n" + ("\n".join(f"- {x}" for x in matched[:80]) if matched else "ничего не найдено"))
+    await message.answer("Р РµР·СѓР»СЊС‚Р°С‚С‹:\n" + ("\n".join(f"- {x}" for x in matched[:80]) if matched else "РЅРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ"))
 
 
 @router.message(Command("create"))
@@ -144,7 +163,7 @@ async def cmd_create(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
         return
     await state.set_state(AdminStates.creating_node_id)
-    await message.answer("Введите ID новой ноды:")
+    await message.answer("Р’РІРµРґРёС‚Рµ ID РЅРѕРІРѕР№ РЅРѕРґС‹:")
 
 
 @router.message(AdminStates.creating_node_id)
@@ -154,7 +173,7 @@ async def fsm_create_id(message: Message, state: FSMContext) -> None:
     node_id = message.text.strip()
     await state.update_data(new_node_id=node_id)
     await state.set_state(AdminStates.creating_node_text)
-    await message.answer("Введите текст ноды:")
+    await message.answer("Р’РІРµРґРёС‚Рµ С‚РµРєСЃС‚ РЅРѕРґС‹:")
 
 
 @router.message(AdminStates.creating_node_text)
@@ -167,7 +186,7 @@ async def fsm_create_text(message: Message, state: FSMContext) -> None:
     text = message.text or ""
     payload = await app.storage.load_nodes_payload()
     if node_id in payload["nodes"]:
-        await message.answer("Нода уже существует.")
+        await message.answer("РќРѕРґР° СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚.")
         await state.clear()
         return
     payload["nodes"][node_id] = {
@@ -183,7 +202,7 @@ async def fsm_create_text(message: Message, state: FSMContext) -> None:
     admin_state["current_edit_node"] = node_id
     await app.storage.save_admin_state(message.from_user.id, admin_state)
     await state.clear()
-    await message.answer(f"Нода {_code(node_id)} создана.\nТекущая нода: {_code(node_id)}")
+    await message.answer(f"РќРѕРґР° {_code(node_id)} СЃРѕР·РґР°РЅР°.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}")
 
 
 @router.message(Command("new"))
@@ -196,7 +215,7 @@ async def cmd_edit(message: Message, state: FSMContext) -> None:
     if not _is_admin(message):
         return
     await state.set_state(AdminStates.editing_text)
-    await message.answer("Введите новый текст для текущей ноды:")
+    await message.answer("Р’РІРµРґРёС‚Рµ РЅРѕРІС‹Р№ С‚РµРєСЃС‚ РґР»СЏ С‚РµРєСѓС‰РµР№ РЅРѕРґС‹:")
 
 
 @router.message(AdminStates.editing_text)
@@ -209,13 +228,13 @@ async def fsm_edit_text(message: Message, state: FSMContext) -> None:
     payload = await app.storage.load_nodes_payload()
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Нода не найдена.")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°.")
         await state.clear()
         return
     node["text"] = message.text or ""
     await app.storage.save_nodes_payload(payload)
     await state.clear()
-    await message.answer(f"Сохранено.\nТекущая нода: {_code(node_id)}")
+    await message.answer(f"РЎРѕС…СЂР°РЅРµРЅРѕ.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}")
 
 
 @router.message(Command("add"))
@@ -232,7 +251,7 @@ async def cmd_add(message: Message, state: FSMContext) -> None:
             ]
         ]
     )
-    await message.answer("Выберите тип кнопки:", reply_markup=kb)
+    await message.answer("Р’С‹Р±РµСЂРёС‚Рµ С‚РёРї РєРЅРѕРїРєРё:", reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("addt:"))
@@ -243,7 +262,7 @@ async def cb_add_type(callback, state: FSMContext) -> None:
     b_type = callback.data.split(":")[1]
     await state.update_data(add_type=b_type)
     await state.set_state(AdminStates.adding_text)
-    await callback.message.answer("Введите текст кнопки:")
+    await callback.message.answer("Р’РІРµРґРёС‚Рµ С‚РµРєСЃС‚ РєРЅРѕРїРєРё:")
     await callback.answer()
 
 
@@ -260,7 +279,7 @@ async def fsm_add_text(message: Message, state: FSMContext) -> None:
         kb_rows.append([InlineKeyboardButton(text=node_id[:24], callback_data=f"pick:{idx}")])
     kb_rows.append([InlineKeyboardButton(text="/new", callback_data="pick:new")])
     await state.set_state(AdminStates.adding_target)
-    await message.answer("Куда ведёт кнопка? Можно выбрать или ввести вручную.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await message.answer("РљСѓРґР° РІРµРґС‘С‚ РєРЅРѕРїРєР°? РњРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ РёР»Рё РІРІРµСЃС‚Рё РІСЂСѓС‡РЅСѓСЋ.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
 
 
 @router.callback_query(F.data.startswith("pick:"))
@@ -271,7 +290,7 @@ async def cb_pick_target(callback, state: FSMContext) -> None:
     key = callback.data.split(":")[1]
     if key == "new":
         await state.clear()
-        await callback.message.answer("Запущено создание ноды. спользуйте /new.")
+        await callback.message.answer("Р—Р°РїСѓС‰РµРЅРѕ СЃРѕР·РґР°РЅРёРµ РЅРѕРґС‹. СЃРїРѕР»СЊР·СѓР№С‚Рµ /new.")
         await callback.answer()
         return
     data = await state.get_data()
@@ -282,7 +301,7 @@ async def cb_pick_target(callback, state: FSMContext) -> None:
         return
     await state.update_data(add_target=nodes[idx])
     await state.set_state(AdminStates.adding_row)
-    await callback.message.answer("Введите row (число, default 0):")
+    await callback.message.answer("Р’РІРµРґРёС‚Рµ row (С‡РёСЃР»Рѕ, default 0):")
     await callback.answer()
 
 
@@ -292,7 +311,7 @@ async def fsm_add_target_manual(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(add_target=(message.text or "").strip())
     await state.set_state(AdminStates.adding_row)
-    await message.answer("Введите row (число, default 0):")
+    await message.answer("Р’РІРµРґРёС‚Рµ row (С‡РёСЃР»Рѕ, default 0):")
 
 
 @router.message(AdminStates.adding_row)
@@ -306,14 +325,14 @@ async def fsm_add_row(message: Message, state: FSMContext) -> None:
     payload = await app.storage.load_nodes_payload()
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         await state.clear()
         return
     row = int((message.text or "0").strip() or "0")
     b_type = data["add_type"]
     target = data["add_target"]
     if b_type == "node" and target not in payload["nodes"]:
-        await message.answer("Target нода не существует. спользуйте /new или введите существующий id.")
+        await message.answer("Target РЅРѕРґР° РЅРµ СЃСѓС‰РµСЃС‚РІСѓРµС‚. СЃРїРѕР»СЊР·СѓР№С‚Рµ /new РёР»Рё РІРІРµРґРёС‚Рµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ id.")
         await state.clear()
         return
     button = {
@@ -327,7 +346,7 @@ async def fsm_add_row(message: Message, state: FSMContext) -> None:
     node.setdefault("buttons", []).append(button)
     await app.storage.save_nodes_payload(payload)
     await state.clear()
-    await message.answer(f"Кнопка добавлена.\nТекущая нода: {_code(node_id)}")
+    await message.answer(f"РљРЅРѕРїРєР° РґРѕР±Р°РІР»РµРЅР°.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}")
 
 
 @router.message(Command("del"))
@@ -340,7 +359,7 @@ async def cmd_del_button(message: Message, command: CommandObject) -> None:
     payload = await app.storage.load_nodes_payload()
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     arg = (command.args or "").strip()
     if not arg:
@@ -350,7 +369,7 @@ async def cmd_del_button(message: Message, command: CommandObject) -> None:
         return
     node["buttons"] = [b for b in node.get("buttons", []) if b.get("id") != arg]
     await app.storage.save_nodes_payload(payload)
-    await message.answer(f"Удалено.\nТекущая нода: {_code(node_id)}")
+    await message.answer(f"РЈРґР°Р»РµРЅРѕ.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}")
 
 
 @router.message(Command("link"))
@@ -365,20 +384,20 @@ async def cmd_link(message: Message, command: CommandObject) -> None:
     app = get_app()
     payload = await app.storage.load_nodes_payload()
     if target not in payload["nodes"]:
-        await message.answer("Target нода не существует")
+        await message.answer("Target РЅРѕРґР° РЅРµ СЃСѓС‰РµСЃС‚РІСѓРµС‚")
         return
     admin_state = await _get_admin_state(message.from_user.id)
     node = payload["nodes"].get(admin_state["current_edit_node"])
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     for btn in node.get("buttons", []):
         if btn.get("id") == btn_id and btn.get("type") == "node":
             btn["target"] = target
             await app.storage.save_nodes_payload(payload)
-            await message.answer(f"Связь обновлена.\nТекущая нода: {_code(admin_state['current_edit_node'])}")
+            await message.answer(f"РЎРІСЏР·СЊ РѕР±РЅРѕРІР»РµРЅР°.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(admin_state['current_edit_node'])}")
             return
-    await message.answer("Button не найден или не типа node")
+    await message.answer("Button РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµ С‚РёРїР° node")
 
 
 @router.message(Command("buttonedit"))
@@ -395,7 +414,7 @@ async def cmd_buttonedit(message: Message, command: CommandObject) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     node = payload["nodes"].get(admin_state["current_edit_node"])
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     button = next((b for b in node.get("buttons", []) if b.get("id") == button_id), None)
     if not button:
@@ -409,7 +428,7 @@ async def cmd_buttonedit(message: Message, command: CommandObject) -> None:
     else:
         button[field] = value
     await app.storage.save_nodes_payload(payload)
-    await message.answer(f"Обновлено.\nТекущая нода: {_code(admin_state['current_edit_node'])}")
+    await message.answer(f"РћР±РЅРѕРІР»РµРЅРѕ.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(admin_state['current_edit_node'])}")
 
 
 @router.message(Command("rows"))
@@ -422,7 +441,7 @@ async def cmd_rows(message: Message, command: CommandObject) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     node = payload["nodes"].get(admin_state["current_edit_node"])
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     if len(args) == 2:
         btn_id, row_value = args
@@ -449,7 +468,7 @@ async def cmd_backbtn(message: Message, command: CommandObject) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     node = payload["nodes"].get(admin_state["current_edit_node"])
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     current = bool(node["settings"].get("show_back", True))
     if arg == "on":
@@ -459,7 +478,7 @@ async def cmd_backbtn(message: Message, command: CommandObject) -> None:
     else:
         node["settings"]["show_back"] = not current
     await app.storage.save_nodes_payload(payload)
-    await message.answer(f"Back: {'ON' if node['settings']['show_back'] else 'OFF'}\nТекущая нода: {_code(admin_state['current_edit_node'])}")
+    await message.answer(f"Back: {'ON' if node['settings']['show_back'] else 'OFF'}\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(admin_state['current_edit_node'])}")
 
 
 @router.message(Command("menubtn"))
@@ -472,7 +491,7 @@ async def cmd_menubtn(message: Message, command: CommandObject) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     node = payload["nodes"].get(admin_state["current_edit_node"])
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     current = bool(node["settings"].get("show_main_menu", True))
     if arg == "on":
@@ -482,7 +501,7 @@ async def cmd_menubtn(message: Message, command: CommandObject) -> None:
     else:
         node["settings"]["show_main_menu"] = not current
     await app.storage.save_nodes_payload(payload)
-    await message.answer(f"Main menu: {'ON' if node['settings']['show_main_menu'] else 'OFF'}\nТекущая нода: {_code(admin_state['current_edit_node'])}")
+    await message.answer(f"Main menu: {'ON' if node['settings']['show_main_menu'] else 'OFF'}\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(admin_state['current_edit_node'])}")
 
 
 @router.message(Command("menutarget"))
@@ -502,7 +521,7 @@ async def cmd_menutarget(message: Message, command: CommandObject) -> None:
     node = payload["nodes"].get(admin_state["current_edit_node"])
     node["settings"]["main_menu_target"] = target
     await app.storage.save_nodes_payload(payload)
-    await message.answer(f"Main menu target set: {_code(target)}\nТекущая нода: {_code(admin_state['current_edit_node'])}")
+    await message.answer(f"Main menu target set: {_code(target)}\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(admin_state['current_edit_node'])}")
 
 
 @router.message(Command("rename"))
@@ -522,7 +541,7 @@ async def cmd_rename(message: Message, command: CommandObject) -> None:
         return
     node = payload["nodes"].pop(old_id, None)
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     node["id"] = new_id
     payload["nodes"][new_id] = node
@@ -573,7 +592,7 @@ async def cmd_delete_node(message: Message, state: FSMContext) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     node_id = admin_state["current_edit_node"]
     if node_id in {"__error__", payload["metadata"].get("real_root_id")}:
-        await message.answer("Системную/корневую ноду удалить нельзя")
+        await message.answer("РЎРёСЃС‚РµРјРЅСѓСЋ/РєРѕСЂРЅРµРІСѓСЋ РЅРѕРґСѓ СѓРґР°Р»РёС‚СЊ РЅРµР»СЊР·СЏ")
         return
     refs = find_incoming_refs(payload["nodes"], node_id)
     lines = [f"Node is referenced by {len(refs)} nodes:"]
@@ -612,7 +631,7 @@ async def cmd_goto(message: Message, command: CommandObject) -> None:
     admin_state = await _get_admin_state(message.from_user.id)
     admin_state["current_edit_node"] = resolved
     await app.storage.save_admin_state(message.from_user.id, admin_state)
-    await message.answer(f"Goto complete.\nТекущая нода: {_code(resolved)}")
+    await message.answer(f"Goto complete.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(resolved)}")
     await send_rendered_node(message, payload["nodes"][resolved], text, keyboard)
 
 
@@ -625,9 +644,9 @@ async def cmd_media(message: Message, state: FSMContext) -> None:
     node_id = admin_state.get("current_edit_node", "start")
     await state.set_state(AdminStates.attaching_media)
     await message.answer(
-        f"Текущая нода: {_code(node_id)}\n"
-        "Пришлите медиа сообщением: photo/video/document/animation/audio/voice.\n"
-        "Или /cancel."
+        f"РўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}\n"
+        "РџСЂРёС€Р»РёС‚Рµ РјРµРґРёР° СЃРѕРѕР±С‰РµРЅРёРµРј: photo/video/document/animation/audio/voice.\n"
+        "РР»Рё /cancel."
     )
 
 
@@ -641,11 +660,11 @@ async def cmd_media_clear(message: Message) -> None:
     node_id = admin_state.get("current_edit_node", "start")
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         return
     node["media"] = None
     await app.storage.save_nodes_payload(payload)
-    await message.answer(f"Медиа удалено.\nТекущая нода: {_code(node_id)}")
+    await message.answer(f"РњРµРґРёР° СѓРґР°Р»РµРЅРѕ.\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}")
 
 
 @router.message(AdminStates.attaching_media)
@@ -674,7 +693,7 @@ async def fsm_attach_media(message: Message, state: FSMContext) -> None:
         file_id = message.voice.file_id
 
     if not media_type or not file_id:
-        await message.answer("Это не поддерживаемое медиа. Пришлите photo/video/document/animation/audio/voice или /cancel.")
+        await message.answer("Р­С‚Рѕ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµРјРѕРµ РјРµРґРёР°. РџСЂРёС€Р»РёС‚Рµ photo/video/document/animation/audio/voice РёР»Рё /cancel.")
         return
 
     app = get_app()
@@ -683,13 +702,13 @@ async def fsm_attach_media(message: Message, state: FSMContext) -> None:
     node_id = admin_state.get("current_edit_node", "start")
     node = payload["nodes"].get(node_id)
     if not node:
-        await message.answer("Нода не найдена")
+        await message.answer("РќРѕРґР° РЅРµ РЅР°Р№РґРµРЅР°")
         await state.clear()
         return
     node["media"] = {"type": media_type, "file_id": file_id}
     await app.storage.save_nodes_payload(payload)
     await state.clear()
-    await message.answer(f"Медиа прикреплено: {_code(media_type)}\nТекущая нода: {_code(node_id)}")
+    await message.answer(f"РњРµРґРёР° РїСЂРёРєСЂРµРїР»РµРЅРѕ: {_code(media_type)}\nРўРµРєСѓС‰Р°СЏ РЅРѕРґР°: {_code(node_id)}")
 
 
 @router.message(Command("tree"))
@@ -786,23 +805,15 @@ async def cmd_compact_ids(message: Message) -> None:
 async def cmd_broadcast_new(message: Message, command: CommandObject) -> None:
     if not _is_admin(message):
         return
-    app = get_app()
-    name = (command.args or "").strip() or f"broadcast_{int(datetime.now(tz=timezone.utc).timestamp())}"
-    admin_state = await _get_admin_state(message.from_user.id)
-    node_id = admin_state.get("current_edit_node", "start")
-    payload_nodes = await app.storage.load_nodes_payload()
-    node = payload_nodes["nodes"].get(node_id)
-    if not node:
-        await message.answer("Нода не найдена")
+    try:
+        broadcast_id, node_id = await _create_broadcast_from_current_node(message.from_user.id, command.args)
+    except ValueError:
+        await message.answer("Current node not found. Use /open <node_id> first.")
         return
-    payload = {
-        "text": node.get("text", ""),
-        "media": node.get("media"),
-        "buttons": [b for b in node.get("buttons", []) if b.get("type") == "url"],
-        "source_node_id": node_id,
-    }
-    broadcast_id = await app.storage.create_broadcast(name, payload, message.from_user.id)
-    await message.answer(f"Создана рассылка id={_code(str(broadcast_id))} из ноды {_code(node_id)}")
+    await message.answer(
+        f"Broadcast created: id={_code(str(broadcast_id))} from node {_code(node_id)}",
+        reply_markup=broadcast_menu_keyboard(),
+    )
 
 
 @router.message(Command("broadcast_list"))
@@ -812,12 +823,12 @@ async def cmd_broadcast_list(message: Message) -> None:
     app = get_app()
     rows = await app.storage.list_broadcasts(limit=30)
     if not rows:
-        await message.answer("Рассылок нет.")
+        await message.answer("No broadcasts yet.")
         return
-    lines = ["Рассылки:"]
+    lines = ["Broadcasts:"]
     for r in rows:
         lines.append(f"- id={_code(str(r['id']))} | {r['name']} | {r['status']} | {r.get('scheduled_at')}")
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), reply_markup=broadcast_menu_keyboard())
 
 
 @router.message(Command("broadcast_status"))
@@ -831,13 +842,14 @@ async def cmd_broadcast_status(message: Message, command: CommandObject) -> None
     app = get_app()
     row = await app.storage.get_broadcast(int(arg))
     if not row:
-        await message.answer("Рассылка не найдена.")
+        await message.answer("Broadcast not found.")
         return
     report = row.get("report") or {}
     await message.answer(
         f"id={_code(str(row['id']))}\nname={html.escape(str(row['name']))}\nstatus={row['status']}\n"
         f"scheduled_at={row.get('scheduled_at')}\nstarted_at={row.get('started_at')}\nfinished_at={row.get('finished_at')}\n"
-        f"report={html.escape(json.dumps(report, ensure_ascii=False))}"
+        f"report={html.escape(json.dumps(report, ensure_ascii=False))}",
+        reply_markup=broadcast_menu_keyboard(),
     )
 
 
@@ -850,8 +862,20 @@ async def cmd_broadcast_send(message: Message, command: CommandObject) -> None:
         await message.answer("Usage: /broadcast_send <id>")
         return
     app = get_app()
-    await app.storage.schedule_broadcast(int(arg), datetime.now(timezone.utc))
-    await message.answer(f"Рассылка {_code(arg)} поставлена на немедленный запуск.")
+    broadcast_id = int(arg)
+    row = await app.storage.get_broadcast(broadcast_id)
+    if not row:
+        await message.answer("Broadcast not found.")
+        return
+    recipients = await app.storage.list_recipients()
+    if not recipients:
+        await message.answer("No recipients yet. Ask users to open the bot first.")
+        return
+    await app.storage.schedule_broadcast(broadcast_id, datetime.now(timezone.utc))
+    await message.answer(
+        f"Broadcast {_code(arg)} scheduled now. Recipients: {_code(str(len(recipients)))}",
+        reply_markup=broadcast_menu_keyboard(),
+    )
 
 
 @router.message(Command("broadcast_schedule"))
@@ -864,15 +888,23 @@ async def cmd_broadcast_schedule(message: Message, command: CommandObject) -> No
         return
     bid = int(args[0])
     dt_raw = args[1].strip()
+    app = get_app()
+    row = await app.storage.get_broadcast(bid)
+    if not row:
+        await message.answer("Broadcast not found.")
+        return
     try:
         dt = datetime.fromisoformat(dt_raw)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=ZoneInfo(get_app().config.tz))
+            dt = dt.replace(tzinfo=ZoneInfo(app.config.tz))
     except Exception:
-        await message.answer("Неверный формат даты.")
+        await message.answer("Invalid datetime format.")
         return
-    await get_app().storage.schedule_broadcast(bid, dt.astimezone(timezone.utc))
-    await message.answer(f"Рассылка {_code(str(bid))} запланирована на {html.escape(dt.isoformat())}")
+    await app.storage.schedule_broadcast(bid, dt.astimezone(timezone.utc))
+    await message.answer(
+        f"Broadcast {_code(str(bid))} scheduled at {html.escape(dt.isoformat())}",
+        reply_markup=broadcast_menu_keyboard(),
+    )
 
 
 @router.message(Command("broadcast_cancel"))
@@ -881,12 +913,15 @@ async def cmd_broadcast_cancel(message: Message, command: CommandObject) -> None
         return
     arg = (command.args or "").strip()
     if not arg.isdigit():
-        await message.answer("Usage: /broadcast_cancel <id>")
+        await message.answer("Usage: /broadcast_cancel <id>\n/boardcast")
         return
-    await get_app().storage.cancel_broadcast(int(arg))
-    await message.answer(f"Рассылка {_code(arg)} отменена.")
-
-
+    app = get_app()
+    row = await app.storage.get_broadcast(int(arg))
+    if not row:
+        await message.answer("Broadcast not found.")
+        return
+    await app.storage.cancel_broadcast(int(arg))
+    await message.answer(f"Broadcast {_code(arg)} canceled.", reply_markup=broadcast_menu_keyboard())
 @router.message(Command("import"))
 async def cmd_import(message: Message, command: CommandObject) -> None:
     if not _is_admin(message):
@@ -938,6 +973,19 @@ async def cmd_help(message: Message) -> None:
     if not _is_admin(message):
         return
     await message.answer(
-        "/open start\n/edit\n/add\n/media\n/media_clear\n/backbtn off\n/menubtn on\n/menutarget start\n/tree\n/tree_depth 3\n/search адвокат\n/validate\n/preview <id>\n/goto <id>\n/stats\n/fix\n/compact_ids\n/broadcast_new [name]\n/broadcast_list\n/broadcast_status <id>\n/broadcast_send <id>\n/broadcast_schedule <id> <iso_datetime>\n/broadcast_cancel <id>"
+        "/open start\n/edit\n/add\n/media\n/media_clear\n/backbtn off\n/menubtn on\n/menutarget start\n/tree\n/tree_depth 3\n/search Р°РґРІРѕРєР°С‚\n/validate\n/preview <id>\n/goto <id>\n/stats\n/fix\n/compact_ids\n/broadcast\n/broadcast_new [name]\n/broadcast_list\n/broadcast_status <id>\n/broadcast_send <id>\n/broadcast_schedule <id> <iso_datetime>\n/broadcast_cancel <id>\n/boardcast"
     )
 
+
+@router.message(Command("admins"))
+async def cmd_admin_alias(message: Message, state: FSMContext) -> None:
+    await cmd_admin(message, state)
+
+
+@router.message(Command("broadcast"))
+@router.message(Command("boardcast"))
+async def cmd_broadcast_menu(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message):
+        return
+    await state.clear()
+    await message.answer("Broadcast menu", reply_markup=broadcast_menu_keyboard())
